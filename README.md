@@ -44,8 +44,9 @@ Options:
 | `--only text` | only files whose path contains the text, e.g. `--only "S6"`; can be repeated |
 | `--skip text` | leave out STL files whose path contains the text, e.g. `--skip XL`; can be repeated |
 
-The XL modules (`XL3`–`XL5` and `XL3²`–`XL5²`, 7 million triangles each) take about an hour each and are 418 mm wide,
-so they do not fit printers with beds up to 350 mm – `--skip XL` saves several hours if you cannot print them anyway.
+The XL modules (`XL3`–`XL7` and `XL3²`–`XL7²`, up to 7 million triangles each) take about 1.5 hours each – `--skip XL`
+saves several hours if you do not print XL. (They are stored rotated by 42.8° and standing on their back, with a
+339.6 × 319.7 mm footprint, so they fit a 340 × 320 mm bed such as the Bambu Lab H2S.)
 
 The whole library (733 STL files, about 24 GB) takes **a few hours** – the service is slow on large modules
 (a 1.4-million-triangle module takes about 4–5 minutes). The largest files are processed first, and after
@@ -123,8 +124,9 @@ python vault_stl_repair.py "D:\VAULT" "D:\VAULT_naprawione"
 
 Opcje: `--workers N` (liczba równoległych procesów, domyślnie 2; największe moduły zajmują po kilka GB RAM),
 `--all` (naprawiaj także pliki bez wykrytych błędów), `--only tekst` (tylko pliki, których ścieżka zawiera tekst),
-`--skip tekst` (pomiń pliki STL z tekstem w ścieżce). Moduły XL (`XL3`–`XL5`, `XL3²`–`XL5²`, po 7 mln trójkątów) trwają
-po około godzinie i mają 418 mm szerokości, więc nie mieszczą się na stołach do 350 mm – `--skip XL` oszczędza kilka godzin.
+`--skip tekst` (pomiń pliki STL z tekstem w ścieżce). Moduły XL (`XL3`–`XL7`, `XL3²`–`XL7²`, do 7 mln trójkątów) trwają
+po około 1,5 godziny – `--skip XL` oszczędza kilka godzin, jeśli nie drukujesz XL. (W plikach leżą obrócone o 42,8°
+i postawione na tylnej ścianie, obrys 339,6 × 319,7 mm, więc mieszczą się na stole 340 × 320 mm, np. Bambu Lab H2S.)
 
 Cała biblioteka (733 pliki STL, ok. 24 GB) trwa **kilka godzin** – usługa jest wolna na dużych modułach
 (moduł z 1,4 mln trójkątów ok. 4–5 minut). Największe pliki idą pierwsze, a po każdym pliku skrypt wypisuje,

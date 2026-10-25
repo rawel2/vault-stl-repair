@@ -9,7 +9,7 @@ Usage (Python 3.9+; numpy and the winrt packages are installed automatically on 
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --all         repair files without detected errors too
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --only "S6"   only paths containing the text
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --skip XL     skip paths containing the text (XL modules:
-                                                                      7 million triangles, ~1 h each, 418 mm wide)
+                                                                      7 million triangles, ~1.5 h each – if you do not print XL)
 
 For every STL file: the mesh is checked (open edges, non-manifold edges, flipped faces – vertices merged at
 exactly equal coordinates, like admesh in slicers). A clean file is copied unchanged; a file with errors is
