@@ -71,6 +71,12 @@ from the origin (they were exported from a large scene), where the STL format (3
 0.001 mm – the micro-triangles produced by the repair would collapse again at that distance (the XL5² module came out
 with 51 new bad edges before this change). Shape and size are unchanged; slicers centre imported files anyway.
 
+The service output is closed when read by vertex indices, but in the biggest files (the XL modules) it leaves a few
+dozen pairs of vertices at exactly the same position under different indices. STL has no indices, so those vertices
+would merge on export and the file would still show non-manifold edges in the slicer (the XL modules used to end
+as `still has errors`). The tool therefore moves such vertices apart by at most 0.002 mm towards their neighbours
+before writing (XL5² module: 48 pairs → 0 errors, volume 908.6 → 908.6 cm³).
+
 ## How it works
 
 Each STL file is first checked with numpy (edges counted after merging vertices at exactly equal coordinates,
@@ -148,6 +154,12 @@ Naprawione pliki są zapisywane ze środkiem bryły otaczającej w punkcie (0,0,
 układu (eksport z dużej sceny), gdzie format STL (liczby 32-bitowe) ma krok ok. 0,001 mm – mikrotrójkąty z naprawy
 zlewałyby się tam ponownie (moduł XL5² przed tą zmianą wychodził z 51 nowymi złymi krawędziami). Kształt i wymiary
 bez zmian; slicery i tak centrują wczytane pliki.
+
+Wynik usługi jest zamknięty, gdy czytać go po indeksach wierzchołków, ale w największych plikach (moduły XL) zostawia
+kilkadziesiąt par wierzchołków o identycznym położeniu pod różnymi indeksami. STL nie ma indeksów, więc przy zapisie
+zlałyby się w jeden i plik dalej pokazywałby w slicerze krawędzie nierozmaitościowe (moduły XL kończyły jako
+`still has errors`). Narzędzie odsuwa więc takie wierzchołki o najwyżej 0,002 mm w stronę sąsiadów przed zapisem
+(moduł XL5²: 48 par → 0 błędów, objętość 908,6 → 908,6 cm³).
 
 ## Autorzy i prawa
 

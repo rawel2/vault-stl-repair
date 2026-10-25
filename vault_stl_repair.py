@@ -17,6 +17,12 @@ written as a 3MF package in memory, loaded with Printing3D3MFPackage, repaired (
 and saved as a binary STL (normals recomputed). All other files (PDF, images) are copied as they are, so the
 target folder has exactly the structure of the source.
 
+The service output is manifold by vertex indices, but in big files (XL modules, 7 million triangles) it leaves
+a few dozen pairs of vertices at exactly the same position under different indices. STL has no indices, so these
+would merge on export and produce non-manifold edges (the residual errors Bambu Studio showed on repaired XL
+modules). `separate()` moves such vertices by at most 0.002 mm towards their neighbours before writing –
+the mesh stays closed, the shape is unchanged.
+
 An interrupted run can be resumed: finished files are skipped (vault_stl_repair.json in the target folder).
 The report vault_stl_repair.csv lists errors before and after, triangle counts and time for every file.
 
@@ -126,6 +132,47 @@ def has_errors(r):
     return bool(r["open"] or r["nonmanifold"] or r["flipped"])
 
 
+def separate(verts, tri, delta=0.002, passes=6):
+    """Vertices at the same position (after rounding to float32) but with different indices are moved by at most
+    `delta` mm towards the centre of their neighbours, so that they do not merge into one vertex when written as STL
+    (XL5² module: 48 pairs -> 49 non-manifold edges). Repeats with a smaller step when a moved vertex lands on another
+    one (micro-triangle soup – neighbours 0.001 mm apart). Returns (float64 vertices, number of moved vertices)."""
+    total = 0
+    for k in range(passes):
+        verts, n = _separate_once(verts, tri, delta / 2 ** k)
+        total += n
+        if n == 0:
+            break
+    return verts, total
+
+
+def _separate_once(verts, tri, delta):
+    import numpy as np
+
+    _, inv, cnt = np.unique(verts.astype(np.float32), axis=0, return_inverse=True, return_counts=True)
+    inv = inv.ravel()
+    coincident = np.nonzero(cnt[inv] > 1)[0]
+    if not len(coincident):
+        return verts, 0
+    out = verts.copy()
+    tk = tri[np.isin(tri, coincident).any(1)]  # only the triangles of coincident vertices (dozens out of millions)
+    for i in coincident:
+        rows = tk[(tk == i).any(1)]
+        nb = np.unique(rows[rows != i])
+        nb = nb[inv[nb] != inv[i]]  # without the twins at the same position
+        if not len(nb):
+            continue
+        dist = np.linalg.norm(verts[nb] - verts[i], axis=1)
+        d = verts[nb].mean(0) - verts[i]
+        if np.linalg.norm(d) < dist.min() / 10:  # symmetric fan – the centre of the neighbours is the vertex itself
+            d = verts[nb[dist.argmax()]] - verts[i]
+        length = np.linalg.norm(d)
+        if length == 0:
+            continue
+        out[i] = verts[i] + d / length * min(delta, dist.min() / 3)
+    return out, len(coincident)
+
+
 def clean(verts, tri):
     """After rounding to float32: merge identical vertices, drop degenerate and duplicated triangles."""
     import numpy as np
@@ -199,7 +246,7 @@ def mesh_arrays(m):
     nv, nt = m.vertex_count, m.index_count
     verts = np.frombuffer(bytes(memoryview(m.get_vertex_positions()).cast("B")), dtype=np.float64)[: nv * 3].reshape(-1, 3)
     tri = np.frombuffer(bytes(memoryview(m.get_triangle_indices()).cast("B")), dtype=np.uint32)[: nt * 3].reshape(-1, 3)
-    return verts.astype(np.float32), tri.astype(np.int64)
+    return verts.copy(), tri.astype(np.int64)
 
 
 async def repair_async(data):
@@ -245,12 +292,13 @@ def repair_file(src, dst, force):
         del verts, tri
         verts, tri = asyncio.run(repair_async(data))
         del data
-        verts, tri = clean(verts, tri)
+        verts, separated = separate(verts, tri)
+        verts, tri = clean(verts.astype(np.float32), tri)
         write_stl(dst, verts, tri)
         del verts, tri
         after = check(dst)
         return {"status": "repaired" if not has_errors(after) else "still has errors", "before": before, "after": after,
-                "shift": [round(float(x), 3) for x in centre], "s": round(time.time() - t0, 1)}
+                "shift": [round(float(x), 3) for x in centre], "separated": separated, "s": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         return {"status": "failed", "error": "%s: %s" % (type(e).__name__, e), "s": round(time.time() - t0, 1)}
 
