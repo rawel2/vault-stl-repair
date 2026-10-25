@@ -42,6 +42,10 @@ Options:
 | `--workers N` | parallel processes (default 2). The largest modules need a few GB of RAM each. |
 | `--all` | repair also files without detected errors (by default they are copied unchanged) |
 | `--only text` | only files whose path contains the text, e.g. `--only "S6"`; can be repeated |
+| `--skip text` | leave out STL files whose path contains the text, e.g. `--skip XL`; can be repeated |
+
+The XL modules (`XL3`–`XL5` and `XL3²`–`XL5²`, 7 million triangles each) take about an hour each and are 418 mm wide,
+so they do not fit printers with beds up to 350 mm – `--skip XL` saves several hours if you cannot print them anyway.
 
 The whole library (733 STL files, about 24 GB) takes **a few hours** – the service is slow on large modules
 (a 1.4-million-triangle module takes about 4–5 minutes). The largest files are processed first, and after
@@ -113,7 +117,9 @@ python vault_stl_repair.py "D:\VAULT" "D:\VAULT_naprawione"
 ```
 
 Opcje: `--workers N` (liczba równoległych procesów, domyślnie 2; największe moduły zajmują po kilka GB RAM),
-`--all` (naprawiaj także pliki bez wykrytych błędów), `--only tekst` (tylko pliki, których ścieżka zawiera tekst).
+`--all` (naprawiaj także pliki bez wykrytych błędów), `--only tekst` (tylko pliki, których ścieżka zawiera tekst),
+`--skip tekst` (pomiń pliki STL z tekstem w ścieżce). Moduły XL (`XL3`–`XL5`, `XL3²`–`XL5²`, po 7 mln trójkątów) trwają
+po około godzinie i mają 418 mm szerokości, więc nie mieszczą się na stołach do 350 mm – `--skip XL` oszczędza kilka godzin.
 
 Cała biblioteka (733 pliki STL, ok. 24 GB) trwa **kilka godzin** – usługa jest wolna na dużych modułach
 (moduł z 1,4 mln trójkątów ok. 4–5 minut). Największe pliki idą pierwsze, a po każdym pliku skrypt wypisuje,

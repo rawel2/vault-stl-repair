@@ -8,6 +8,8 @@ Usage (Python 3.9+; numpy and the winrt packages are installed automatically on 
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --workers 2   parallel processes (default 2)
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --all         repair files without detected errors too
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --only "S6"   only paths containing the text
+    python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --skip XL     skip paths containing the text (XL modules:
+                                                                      7 million triangles, ~1 h each, 418 mm wide)
 
 For every STL file: the mesh is checked (open edges, non-manifold edges, flipped faces – vertices merged at
 exactly equal coordinates, like admesh in slicers). A clean file is copied unchanged; a file with errors is
@@ -254,6 +256,7 @@ def main():
     ap.add_argument("--all", action="store_true", help="repair files without detected errors too")
     ap.add_argument("--workers", type=int, default=2, help="parallel processes (default 2; large files need a few GB each)")
     ap.add_argument("--only", action="append", default=[], help="only files whose path contains the text (repeatable)")
+    ap.add_argument("--skip", action="append", default=[], help="skip STL files whose path contains the text, e.g. --skip XL (repeatable)")
     a = ap.parse_args()
     for s in (sys.stdout, sys.stderr):
         if hasattr(s, "reconfigure"):
@@ -280,6 +283,8 @@ def main():
     stl, other = [], []
     for p in files:
         (stl if p.suffix.lower() == ".stl" else other).append(p)
+    if a.skip:  # skipped STL files are left out of the target entirely (e.g. XL modules that do not fit your printer)
+        stl = [p for p in stl if not any(t.lower() in p.relative_to(source).as_posix().lower() for t in a.skip)]
     for p in other:
         d = target / p.relative_to(source)
         if not d.exists() or d.stat().st_size != p.stat().st_size:
