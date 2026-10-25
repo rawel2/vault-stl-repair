@@ -65,6 +65,11 @@ The repair keeps the geometry: in the tests the volume and the bounding box of r
 the originals (e.g. S6 1F module: 104 213 non-manifold edges and 207 990 flipped faces → 0, volume 406.6 → 406.7 cm³;
 the triangle count drops because duplicated faces are removed).
 
+Repaired files are written with the centre of their bounding box at (0,0,0). The original files lie 1–28 m away
+from the origin (they were exported from a large scene), where the STL format (32-bit floats) has a step of about
+0.001 mm – the micro-triangles produced by the repair would collapse again at that distance (the XL5² module came out
+with 51 new bad edges before this change). Shape and size are unchanged; slicers centre imported files anyway.
+
 ## How it works
 
 Each STL file is first checked with numpy (edges counted after merging vertices at exactly equal coordinates,
@@ -136,6 +141,11 @@ uruchomić ponownie: gotowe pliki są pomijane (`vault_stl_repair.json` w folder
 Naprawa zachowuje geometrię: w testach objętość i wymiary naprawionych części były identyczne z oryginałem
 (np. moduł S6 1F: 104 213 krawędzi nierozmaitościowych i 207 990 odwróconych ścian → 0, objętość 406,6 → 406,7 cm³;
 liczba trójkątów spada, bo usuwane są zdublowane ściany).
+
+Naprawione pliki są zapisywane ze środkiem bryły otaczającej w punkcie (0,0,0). Oryginały leżą 1–28 m od początku
+układu (eksport z dużej sceny), gdzie format STL (liczby 32-bitowe) ma krok ok. 0,001 mm – mikrotrójkąty z naprawy
+zlewałyby się tam ponownie (moduł XL5² przed tą zmianą wychodził z 51 nowymi złymi krawędziami). Kształt i wymiary
+bez zmian; slicery i tak centrują wczytane pliki.
 
 ## Autorzy i prawa
 

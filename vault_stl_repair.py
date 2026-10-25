@@ -126,6 +126,20 @@ def has_errors(r):
     return bool(r["open"] or r["nonmanifold"] or r["flipped"])
 
 
+def clean(verts, tri):
+    """After rounding to float32: merge identical vertices, drop degenerate and duplicated triangles."""
+    import numpy as np
+
+    verts, tri = index_mesh(verts[tri])
+    f = tri.astype(np.int64)
+    ok = (f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])
+    key = np.ascontiguousarray(np.sort(f, axis=1)).view(np.dtype((np.void, 24))).ravel()
+    _, first = np.unique(key, return_index=True)
+    keep = np.zeros(len(f), bool)
+    keep[first] = True
+    return verts, f[keep & ok]
+
+
 def write_stl(path, verts, tri):
     import numpy as np
 
@@ -219,16 +233,24 @@ def repair_file(src, dst, force):
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             return {"status": "copied", "before": before, "after": before, "s": round(time.time() - t0, 1)}
+        import numpy as np
+
         verts, tri = index_mesh(read_triangles(src))
-        data = package_3mf(verts, tri)
+        # The USSA files lie 1-28 m away from the origin (exported from a large scene), where float32 has a step of
+        # 0.001-0.002 mm – micro-triangles from the repair would collapse when written as STL (XL5² module: 51 new bad
+        # edges). The repaired file is therefore written with the centre of its bounding box at (0,0,0); size and shape
+        # are unchanged.
+        centre = (verts.min(0).astype(np.float64) + verts.max(0).astype(np.float64)) / 2
+        data = package_3mf(verts.astype(np.float64) - centre, tri)
         del verts, tri
         verts, tri = asyncio.run(repair_async(data))
         del data
+        verts, tri = clean(verts, tri)
         write_stl(dst, verts, tri)
         del verts, tri
         after = check(dst)
         return {"status": "repaired" if not has_errors(after) else "still has errors", "before": before, "after": after,
-                "s": round(time.time() - t0, 1)}
+                "shift": [round(float(x), 3) for x in centre], "s": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         return {"status": "failed", "error": "%s: %s" % (type(e).__name__, e), "s": round(time.time() - t0, 1)}
 
