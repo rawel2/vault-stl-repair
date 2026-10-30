@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-"""VAULT STL repair – repairs the mesh errors of a whole STL library with the Windows 3D model repair
-service (Windows.Graphics.Printing3D) – the same one Bambu Studio uses for "Repair model" – and writes
-a copy of the library with the repaired files. Windows 10/11 only.
+"""VAULT STL repair – repairs the mesh errors of a whole STL library and writes a copy of the library with the
+repaired files. Two methods (--method):
+  windows – the Windows 3D model repair service (Windows.Graphics.Printing3D), the same one Bambu Studio uses for
+            "Repair model"; Windows 10/11 only, slow (XL modules ~1.5 h each); default on Windows,
+  numpy   – own repair with numpy only (numpy_repair.py next to this file), much faster (the whole library in about
+            2 hours); any system, default on macOS and Linux. Repairs all files but two (S6 1F/2F sustainer
+            modules – multi-layer surfaces, left unchanged) and never writes a file worse than the original.
 
-Usage (Python 3.9+; numpy and the winrt packages are installed automatically on first run):
+Usage (Python 3.9+; numpy and – for the windows method – the winrt packages are installed automatically):
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired"
+    python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --method numpy  repair method: auto (default), windows, numpy
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --workers 2   parallel processes (default 2)
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --all         repair files without detected errors too
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --only "S6"   only paths containing the text
     python vault_stl_repair.py "D:\\VAULT" "D:\\VAULT_repaired" --skip XL     skip paths containing the text (XL modules:
-                                                                      7 million triangles, ~1.5 h each – if you do not print XL)
+                                                                      7 million triangles, ~1.5 h each with the windows method)
 
 For every STL file: the mesh is checked (open edges, non-manifold edges, flipped faces – vertices merged at
-exactly equal coordinates, like admesh in slicers). A clean file is copied unchanged; a file with errors is
-written as a 3MF package in memory, loaded with Printing3D3MFPackage, repaired (Printing3DModel.RepairAsync)
-and saved as a binary STL (normals recomputed). All other files (PDF, images) are copied as they are, so the
-target folder has exactly the structure of the source.
+exactly equal coordinates, like admesh in slicers). A clean file is copied unchanged. With the windows method a file
+with errors is written as a 3MF package in memory, loaded with Printing3D3MFPackage, repaired
+(Printing3DModel.RepairAsync) and saved as a binary STL (normals recomputed). With the numpy method it is repaired by
+numpy_repair.repair(); when the result still has errors or a different bounding box, the original is copied instead
+(status "still has errors"). All other files (PDF, images) are copied as they are, so the target folder has exactly
+the structure of the source.
 
 The service output is manifold by vertex indices, but in big files (XL modules, 7 million triangles) it leaves
 a few dozen pairs of vertices at exactly the same position under different indices. STL has no indices, so these
@@ -45,7 +52,7 @@ from pathlib import Path
 
 PACKAGES = ["numpy", "winrt-runtime", "winrt-Windows.Graphics.Printing3D", "winrt-Windows.Foundation",
             "winrt-Windows.Foundation.Collections", "winrt-Windows.Storage.Streams"]
-HEADER = b"VAULT STL repair (Windows Printing3D)"
+HEADERS = {"windows": b"VAULT STL repair (Windows Printing3D)", "numpy": b"VAULT STL repair (numpy)"}
 LOG = "vault_stl_repair.json"
 REPORT = "vault_stl_repair.csv"
 
@@ -59,18 +66,20 @@ RELS = ('<?xml version="1.0" encoding="UTF-8"?>\n'
         'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>')
 
 
-def install_packages():
+def install_packages(method):
+    packages = PACKAGES if method == "windows" else PACKAGES[:1]
     try:
         import numpy  # noqa: F401
-        import winrt.windows.graphics.printing3d  # noqa: F401
-        import winrt.windows.storage.streams  # noqa: F401
+        if method == "windows":
+            import winrt.windows.graphics.printing3d  # noqa: F401
+            import winrt.windows.storage.streams  # noqa: F401
         return True
     except ImportError:
         pass
-    print("Installing required packages (" + ", ".join(PACKAGES) + ")...", flush=True)
-    code = subprocess.call([sys.executable, "-m", "pip", "install", "--quiet", *PACKAGES])
+    print("Installing required packages (" + ", ".join(packages) + ")...", flush=True)
+    code = subprocess.call([sys.executable, "-m", "pip", "install", "--quiet", *packages])
     if code:
-        print("Could not install the packages. Install them manually:\n  " + sys.executable + " -m pip install " + " ".join(PACKAGES))
+        print("Could not install the packages. Install them manually:\n  " + sys.executable + " -m pip install " + " ".join(packages))
         return False
     return True
 
@@ -187,7 +196,7 @@ def clean(verts, tri):
     return verts, f[keep & ok]
 
 
-def write_stl(path, verts, tri):
+def write_stl(path, verts, tri, header):
     import numpy as np
 
     v = verts[tri]
@@ -200,7 +209,7 @@ def write_stl(path, verts, tri):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "wb") as f:
-        f.write(HEADER.ljust(80, b"\0"))
+        f.write(header.ljust(80, b"\0"))
         f.write(len(tri).to_bytes(4, "little"))
         f.write(data.tobytes())
     tmp.replace(path)
@@ -271,7 +280,15 @@ async def repair_async(data):
     return verts, tri
 
 
-def repair_file(src, dst, force):
+def _unchanged(src, dst, before, t0, reason):
+    """The numpy repair did not succeed – the target gets the original (status "still has errors", reason in the log)."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    return {"status": "still has errors", "before": before, "after": before, "method": "numpy", "skipped": reason,
+            "s": round(time.time() - t0, 1)}
+
+
+def repair_file(src, dst, force, method="windows"):
     """One STL file: check, repair if needed, write. Returns a log record."""
     t0 = time.time()
     try:
@@ -282,30 +299,56 @@ def repair_file(src, dst, force):
             return {"status": "copied", "before": before, "after": before, "s": round(time.time() - t0, 1)}
         import numpy as np
 
+        # the result of a file appears only after its repair (XL with the windows method ~1.5 h) – without this line
+        # the counter stays at 0 for a long time
+        print("    repairing: %s (%d triangles, %s)" % (src.name, before["triangles"], errors_text(before)), flush=True)
         verts, tri = index_mesh(read_triangles(src))
         # The USSA files lie 1-28 m away from the origin (exported from a large scene), where float32 has a step of
         # 0.001-0.002 mm – micro-triangles from the repair would collapse when written as STL (XL5² module: 51 new bad
         # edges). The repaired file is therefore written with the centre of its bounding box at (0,0,0); size and shape
         # are unchanged.
         centre = (verts.min(0).astype(np.float64) + verts.max(0).astype(np.float64)) / 2
-        data = package_3mf(verts.astype(np.float64) - centre, tri)
-        del verts, tri
-        verts, tri = asyncio.run(repair_async(data))
-        del data
+        if method == "numpy":
+            import numpy_repair
+            box = verts.max(0).astype(np.float64) - verts.min(0)
+            try:
+                verts, tri = numpy_repair.repair(verts.astype(np.float64) - centre, tri.astype(np.int64), log=lambda t: None)
+            except numpy_repair.TooManyDefects as e:
+                return _unchanged(src, dst, before, t0, str(e))
+        else:
+            data = package_3mf(verts.astype(np.float64) - centre, tri)
+            del verts, tri
+            verts, tri = asyncio.run(repair_async(data))
+            del data
         verts, separated = separate(verts, tri)
         verts, tri = clean(verts.astype(np.float32), tri)
-        write_stl(dst, verts, tri)
+        # numpy method: in a micro-triangle soup (edges of 0.00001 mm – M4 4F, S6 4F sustainer) rounding to float32 can
+        # merge or flip a few triangles – then the already rounded mesh is repaired once more
+        for _ in range(3 if method == "numpy" else 0):
+            if numpy_repair.errors(tri.astype(np.int64)) == (0, 0):
+                break
+            verts, tri = numpy_repair.repair(verts.astype(np.float64), tri.astype(np.int64), log=lambda t: None)
+            verts, n = separate(verts, tri)
+            separated += n
+            verts, tri = clean(verts.astype(np.float32), tri)
+        # the numpy method never writes a file worse than the original: errors or a different bounding box -> original
+        if method == "numpy" and np.abs((verts.max(0) - verts.min(0)).astype(np.float64) - box).max() > 0.01:
+            return _unchanged(src, dst, before, t0, "the bounding box would change")
+        write_stl(dst, verts, tri, HEADERS[method])
         del verts, tri
         after = check(dst)
+        if method == "numpy" and has_errors(after):
+            return _unchanged(src, dst, before, t0, errors_text(after))
         return {"status": "repaired" if not has_errors(after) else "still has errors", "before": before, "after": after,
-                "shift": [round(float(x), 3) for x in centre], "separated": separated, "s": round(time.time() - t0, 1)}
+                "method": method, "shift": [round(float(x), 3) for x in centre], "separated": separated,
+                "s": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         return {"status": "failed", "error": "%s: %s" % (type(e).__name__, e), "s": round(time.time() - t0, 1)}
 
 
 def _job(args):
-    src, dst, force = args
-    return src, repair_file(src, dst, force)
+    src, dst, force, method = args
+    return src, repair_file(src, dst, force, method)
 
 
 # ---------------------------------------------------------------- main
@@ -320,21 +363,28 @@ def hms(s):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Repair the STL meshes of a VAULT library with the Windows 3D model repair service")
+    ap = argparse.ArgumentParser(description="Repair the STL meshes of a VAULT library")
     ap.add_argument("source", help="library folder (VAULT STL files)")
     ap.add_argument("target", help="target folder for the repaired copy")
     ap.add_argument("--all", action="store_true", help="repair files without detected errors too")
     ap.add_argument("--workers", type=int, default=2, help="parallel processes (default 2; large files need a few GB each)")
     ap.add_argument("--only", action="append", default=[], help="only files whose path contains the text (repeatable)")
     ap.add_argument("--skip", action="append", default=[], help="skip STL files whose path contains the text, e.g. --skip XL (repeatable)")
+    ap.add_argument("--method", choices=["auto", "windows", "numpy"], default="auto",
+                    help="repair method: windows (Windows 10/11 service), numpy (own, any system); "
+                         "auto = windows on Windows, numpy elsewhere")
     a = ap.parse_args()
     for s in (sys.stdout, sys.stderr):
         if hasattr(s, "reconfigure"):
             s.reconfigure(errors="replace")
-    if sys.platform != "win32":
-        print("This tool needs Windows 10/11 (the mesh repair service is part of Windows).")
+    method = a.method if a.method != "auto" else ("windows" if sys.platform == "win32" else "numpy")
+    if method == "windows" and sys.platform != "win32":
+        print("The windows method needs Windows 10/11 (the mesh repair service is part of Windows) – use --method numpy.")
         return 2
-    if not install_packages():
+    if method == "numpy" and not (Path(__file__).resolve().parent / "numpy_repair.py").exists():
+        print("numpy_repair.py is missing – it must lie next to vault_stl_repair.py.")
+        return 2
+    if not install_packages(method):
         return 2
     source, target = Path(a.source).resolve(), Path(a.target).resolve()
     if not source.is_dir():
@@ -360,7 +410,8 @@ def main():
         if not d.exists() or d.stat().st_size != p.stat().st_size:
             d.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, d)
-    print("Source: %s\nTarget: %s\nSTL files: %d, other files copied: %d" % (source, target, len(stl), len(other)), flush=True)
+    print("Source: %s\nTarget: %s\nMethod: %s\nSTL files: %d, other files copied: %d" % (
+        source, target, method, len(stl), len(other)), flush=True)
 
     todo = []
     for p in stl:
@@ -370,7 +421,7 @@ def main():
         if rec and rec.get("size") == p.stat().st_size and d.exists() and rec.get("status") in ("copied", "repaired") \
                 and (rec["status"] == "repaired" or not a.all):
             continue
-        todo.append((p, d, a.all))
+        todo.append((p, d, a.all, method))
     todo.sort(key=lambda x: -x[0].stat().st_size)  # largest first – keeps the workers busy until the end
     print("To do: %d (already done: %d)" % (len(todo), len(stl) - len(todo)), flush=True)
 
@@ -402,8 +453,8 @@ def main():
             done, len(todo) - done, 100 * bytes_done / max(bytes_total, 1), hms(elapsed), hms(left)), flush=True)
 
     if workers == 1:
-        for src, dst, force in todo:
-            record(src, repair_file(src, dst, force))
+        for src, dst, force, m in todo:
+            record(src, repair_file(src, dst, force, m))
     else:
         with ProcessPoolExecutor(workers) as ex:
             for fut in as_completed([ex.submit(_job, z) for z in todo]):
