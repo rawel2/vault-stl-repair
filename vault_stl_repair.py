@@ -50,6 +50,12 @@ import zipfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+# module level, not in main(): worker processes (spawn) import the module without running main(), and
+# output redirected to a file uses cp1250 on Windows – a '²' in a file name aborted the repair
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(errors="replace")
+
 PACKAGES = ["numpy", "winrt-runtime", "winrt-Windows.Graphics.Printing3D", "winrt-Windows.Foundation",
             "winrt-Windows.Foundation.Collections", "winrt-Windows.Storage.Streams"]
 HEADERS = {"windows": b"VAULT STL repair (Windows Printing3D)", "numpy": b"VAULT STL repair (numpy)"}
@@ -374,9 +380,6 @@ def main():
                     help="repair method: windows (Windows 10/11 service), numpy (own, any system); "
                          "auto = windows on Windows, numpy elsewhere")
     a = ap.parse_args()
-    for s in (sys.stdout, sys.stderr):
-        if hasattr(s, "reconfigure"):
-            s.reconfigure(errors="replace")
     method = a.method if a.method != "auto" else ("windows" if sys.platform == "win32" else "numpy")
     if method == "windows" and sys.platform != "win32":
         print("The windows method needs Windows 10/11 (the mesh repair service is part of Windows) – use --method numpy.")
